@@ -138,8 +138,8 @@ async function processFile(file){
     log('✓ Загружен MOBI:', file.name);
   } else if(name.endsWith('.html')||name.endsWith('.htm')||name.endsWith('.txt')){
     const txt = await file.text();
-    const wrapped = `<?xml version="1.0"?><FictionBook><body>${txt}</body></FictionBook>`;
-    loadedFb2s.push({name:file.name, xml:wrapped, binaries:new Map(), cover:null});
+        const wrapped = `<?xml version="1.0"?><FictionBook><body>${txt}</body></FictionBook>`;
+    loadedFb2s.push({name:file.name, xml:wrapped, binaries:new Map(), cover:null, author:'', series:'', seriesNum:''});
     log('✓ Загружен (HTML/TXT):', file.name);
   } else {
     // Try to detect format by content (magic bytes) — useful on mobile where file extension may be unrecognized
@@ -165,12 +165,12 @@ async function processFile(file){
           loadedFb2s.push(item);
           log('✓ Определён как FB2 (по содержимому):', file.name);
         } else if(txt.includes('<html') || txt.includes('<!DOCTYPE html')){
-          const wrapped = `<?xml version="1.0"?><FictionBook><body>${txt}</body></FictionBook>`;
-          loadedFb2s.push({name:file.name, xml:wrapped, binaries:new Map(), cover:null});
+                    const wrapped = `<?xml version="1.0"?><FictionBook><body>${txt}</body></FictionBook>`;
+          loadedFb2s.push({name:file.name, xml:wrapped, binaries:new Map(), cover:null, author:'', series:'', seriesNum:''});
           log('✓ Определён как HTML (по содержимому):', file.name);
         } else {
           const wrapped = `<?xml version="1.0"?><FictionBook><body>${txt}</body></FictionBook>`;
-          loadedFb2s.push({name:file.name, xml:wrapped, binaries:new Map(), cover:null});
+          loadedFb2s.push({name:file.name, xml:wrapped, binaries:new Map(), cover:null, author:'', series:'', seriesNum:''});
           log('✓ Загружен как текст:', file.name);
         }
       }
@@ -219,9 +219,11 @@ async function processEpubArrayBuffer(arrayBuffer, name){
       }
     }catch(e){ continue; }
   }
-  const bodyCombined = bodies.join('');
+    const bodyCombined = bodies.join('');
   const xml = `<?xml version="1.0"?><FictionBook><description><title-info><book-title>${escapeXml(title)}</book-title></title-info></description><body>${bodyCombined}</body></FictionBook>`;
-  return {name, xml, binaries:new Map(), cover};
+  // Try to fetch author & series from intermediate FB2 XML
+  const meta = parseFB2Meta(xml);
+  return {name, xml, binaries:new Map(), cover, author: meta.author, series: meta.series, seriesNum: meta.seriesNum};
 }
 
 function extractBinariesAndCover(xmlText, name){
@@ -250,7 +252,8 @@ function extractBinariesAndCover(xmlText, name){
       cover = {blob, filename: (name.replace(/\.[^.]+$/, '') + '_cover.' + ext), type: bin.contentType};
     }
   }
-  return {name, xml: xmlText, binaries, cover};
+    const meta = parseFB2Meta(xmlText);
+  return {name, xml: xmlText, binaries, cover, author: meta.author, series: meta.series, seriesNum: meta.seriesNum};
 }
 
 function mimeToExt(mime){
@@ -269,25 +272,22 @@ function base64ToBlob(base64, contentType){
   return new Blob([bytes], {type: contentType});
 }
 
-function parseFB2(xmlText){
+function parseFB2Meta(xmlText){
   const parser = new DOMParser();
   const doc = parser.parseFromString(xmlText, 'application/xml');
-  // FB2 title is in <description><title-info><book-title>
-  // querySelector may fail with namespaced XML, so use multiple fallbacks
-    let titleEl = doc.querySelector('description > title-info > book-title')
-              || doc.querySelector('title-info > book-title')
-              || doc.querySelector('book-title');
+  // Title
+  let titleEl = doc.querySelector('description > title-info > book-title')
+            || doc.querySelector('title-info > book-title')
+            || doc.querySelector('book-title');
   if (!titleEl) {
     const els = doc.getElementsByTagName('book-title');
     if (els.length > 0) titleEl = els[0];
   }
   if (!titleEl) {
-    // fallback for document-title (used by alternative FB2 styles)
     const dtEl = doc.querySelector('document-title');
     if (dtEl) titleEl = dtEl;
   }
   if (!titleEl) {
-    // try generic title element (avoid section titles)
     const titleEls = doc.getElementsByTagName('title');
     for (const t of titleEls) {
       const parent = t.parentElement;
@@ -297,6 +297,38 @@ function parseFB2(xmlText){
     }
   }
   const title = titleEl ? titleEl.textContent.trim() : 'Untitled';
+  
+  // Author
+  const authorEl = doc.querySelector('description > title-info > author')
+                || doc.querySelector('title-info > author');
+  let author = '';
+  if (authorEl) {
+    const fn = authorEl.querySelector('first-name');
+    const mn = authorEl.querySelector('middle-name');
+    const ln = authorEl.querySelector('last-name');
+    const parts = [];
+    if (fn) parts.push(fn.textContent.trim());
+    if (mn) parts.push(mn.textContent.trim());
+    if (ln) parts.push(ln.textContent.trim());
+    author = parts.join(' ');
+  }
+  
+  // Series
+  const seqEl = doc.querySelector('description > title-info > sequence')
+             || doc.querySelector('title-info > sequence');
+  let series = '';
+  let seriesNum = '';
+  if (seqEl) {
+    series = seqEl.getAttribute('name') || '';
+    seriesNum = seqEl.getAttribute('number') || '';
+  }
+  
+  return {title, author, series, seriesNum, doc};
+}
+
+function parseFB2(xmlText){
+  const meta = parseFB2Meta(xmlText);
+  const doc = meta.doc;
   
   // extract body and sections
   const bodies = Array.from(doc.querySelectorAll('body')).map(body=>{
@@ -320,7 +352,7 @@ function parseFB2(xmlText){
     }
   }).flat();
   
-  return {title, bodies, doc};
+  return {title: meta.title, author: meta.author, series: meta.series, seriesNum: meta.seriesNum, bodies, doc};
 }
 
 function buildMergedFB2(items){
@@ -362,23 +394,73 @@ mergeBtn.addEventListener('click', ()=>{
   if(!loadedFb2s.length){ log('⚠ Нет загруженных файлов'); return; }
   setStatus('Объединяю...', true);
   log('ℹ Объединяю ' + loadedFb2s.length + ' книг(и)...');
-  const bookTitles = [];
+  
+  const bookMetas = [];
+  let allSameSeries = true;
+  let commonSeries = '';
+  let commonAuthor = '';
+  
   for(let i=0; i<loadedFb2s.length; i++){
-    const t = parseFB2(loadedFb2s[i].xml);
-    const title = t.title || loadedFb2s[i].name || `Часть ${i+1}`;
-    bookTitles.push(title);
-    log(`✓ [${i+1}] "${title}" — ${t.bodies.length} раздел(ов)`);
+    const it = loadedFb2s[i];
+    const t = parseFB2(it.xml);
+    const title = t.title || it.name || `Часть ${i+1}`;
+    const author = t.author || it.author || '';
+    const series = t.series || it.series || '';
+    const seriesNum = t.seriesNum || it.seriesNum || '';
+    bookMetas.push({title, author, series, seriesNum});
+    
+    if(i === 0){
+      commonSeries = series;
+      commonAuthor = author;
+    } else {
+      if(series !== commonSeries) allSameSeries = false;
+    }
+    
+    log(`✓ [${i+1}] "${author ? author + ' - ' : ''}${title}"${series ? ' ['+series+(seriesNum?' №'+seriesNum:'')+']' : ''} — ${t.bodies.length} раздел(ов)`);
   }
+  
   const merged = buildMergedFB2(loadedFb2s);
   if(merged){
     const firstCover = loadedFb2s[0] && loadedFb2s[0].cover ? loadedFb2s[0].cover : null;
-    let mergedTitle = '';
-    if(bookTitles.length <= 3){
-      mergedTitle = bookTitles.join(' + ');
+    
+    // Determine display title and filename base
+    let displayTitle = '';
+    let suggestedFilename = '';
+    
+    if(loadedFb2s.length === 1){
+      // Single book: "Author - Title"
+      const m = bookMetas[0];
+      displayTitle = m.author ? `${m.author} - ${m.title}` : m.title;
+      suggestedFilename = displayTitle;
+    } else if(allSameSeries && commonSeries){
+      // Multiple books, same series: series name
+      displayTitle = commonSeries;
+      suggestedFilename = commonSeries;
     } else {
-      mergedTitle = bookTitles.slice(0, 2).join(' + ') + ` (+${bookTitles.length - 2})`;
+      // Multiple books, different/no series: prompt user
+      const bookListStr = bookMetas.map(m => m.title).join(', ');
+      suggestedFilename = prompt(
+        'Укажите название для объединённой книги:',
+        bookMetas.map(m => m.title).join(' + ')
+      );
+      if(!suggestedFilename || suggestedFilename.trim() === ''){
+        suggestedFilename = bookMetas.map(m => m.title).join(' + ');
+      }
+      suggestedFilename = suggestedFilename.trim();
+      displayTitle = suggestedFilename;
     }
-    window._lastMerged = {xml:merged, title: mergedTitle, items: loadedFb2s.slice(), cover: firstCover, bookTitles};
+    
+    window._lastMerged = {
+      xml: merged,
+      title: displayTitle,
+      items: loadedFb2s.slice(),
+      cover: firstCover,
+      bookMetas,
+      allSameSeries,
+      commonSeries,
+      commonAuthor,
+      suggestedFilename
+    };
     exportEpubBtn.disabled = false;
     log('✅ Готово — нажмите «Скачать EPUB»');
     setStatus('Объединено ✓');
@@ -426,7 +508,7 @@ exportEpubBtn.addEventListener('click', async ()=>{
   setStatus('Создаю EPUB...', true);
   exportEpubBtn.disabled = true;
   try{
-    const safeFilename = (v.title || 'merged').replace(/[<>:"/\\|?*]+/g, '_').replace(/\s+/g, ' ') + '.epub';
+    const safeFilename = (v.suggestedFilename || v.title || 'merged').replace(/[<>:"/\\|?*]+/g, '_').replace(/\s+/g, ' ') + '.epub';
     await createEpubFromMerged(v, safeFilename);
     log('✅ EPUB скачан!');
     setStatus('EPUB готов ✓');
@@ -529,8 +611,27 @@ function renderFilesList(){
 async function createEpubFromMerged(mergedObj, filename='book.epub'){
   const items = mergedObj.items || [];
   const title = mergedObj.title || 'Merged Book';
-  const bookTitles = mergedObj.bookTitles || [];
-  const description = bookTitles.length > 0 ? `Объединённая книга: ${bookTitles.join('; ')}` : 'Объединённая книга';
+  const bookMetas = mergedObj.bookMetas || [];
+  const allSameSeries = mergedObj.allSameSeries;
+  const commonSeries = mergedObj.commonSeries || '';
+  const commonAuthor = mergedObj.commonAuthor || '';
+  
+  // Build description
+  let description = '';
+  if(bookMetas.length > 0){
+    const parts = bookMetas.map(m => {
+      let s = m.title;
+      if(m.author) s = m.author + ' — ' + s;
+      return s;
+    });
+    description = 'Объединённая книга: ' + parts.join('; ');
+  } else {
+    description = 'Объединённая книга';
+  }
+  
+  // Collect all unique authors
+  const allAuthors = [...new Set(bookMetas.map(m => m.author).filter(a => a))];
+  
   const zip = new JSZip();
   zip.file('mimetype', 'application/epub+zip', {compression: 'STORE'});
   zip.folder('META-INF').file('container.xml', `<?xml version="1.0"?>\n<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">\n  <rootfiles>\n    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>\n  </rootfiles>\n</container>`);
@@ -623,11 +724,33 @@ async function createEpubFromMerged(mergedObj, filename='book.epub'){
   }
   buildNcx(tocNav.slice(1)); // skip cover entry
   
-  const ncx = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">\n<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">\n  <head>\n    <meta name="dtb:uid" content="id:merged"/>\n  </head>\n  <docTitle><text>${escapeXml(title)}</text></docTitle>\n  <navMap>\n    ${ncxNavPoints}\n  </navMap>\n</ncx>`;
+  const ncxTitle = allSameSeries && commonSeries ? commonSeries : title;
+  const ncx = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">\n<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">\n  <head>\n    <meta name="dtb:uid" content="id:merged"/>\n  </head>\n  <docTitle><text>${escapeXml(ncxTitle)}</text></docTitle>\n  ${allAuthors.length > 0 ? `  <docAuthor><text>${escapeXml(allAuthors.join('; '))}</text></docAuthor>\n` : ''}  <navMap>\n    ${ncxNavPoints}\n  </navMap>\n</ncx>`;
   oebps.file('toc.ncx', ncx);
   manifest.push(`<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>`);
 
-  const contentOpf = `<?xml version="1.0" encoding="utf-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="uid">\n  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">\n    <dc:title>${escapeXml(title)}</dc:title>\n    <dc:language>ru</dc:language>\n    <dc:description>${escapeXml(description)}</dc:description>\n    <dc:identifier id="uid">id:merged-${Date.now()}</dc:identifier>\n    ${mergedObj.cover?'<meta name="cover" content="cover-image"/>':''}\n  </metadata>\n  <manifest>\n    ${manifest.join('\n    ')}\n  </manifest>\n  <spine toc="ncx">\n    ${spine.join('\n    ')}\n  </spine>\n</package>`;
+  let metaXml = `    <dc:title>${escapeXml(title)}</dc:title>\n    <dc:language>ru</dc:language>\n    <dc:description>${escapeXml(description)}</dc:description>\n    <dc:identifier id="uid">id:merged-${Date.now()}</dc:identifier>\n`;
+  
+  // Add authors
+  for(const author of allAuthors){
+    metaXml += `    <dc:creator>${escapeXml(author)}</dc:creator>\n`;
+  }
+  
+  // If one book, add its author as dc:creator too (from bookMetas)
+  if(bookMetas.length === 1 && bookMetas[0].author && allAuthors.length === 0){
+    metaXml += `    <dc:creator>${escapeXml(bookMetas[0].author)}</dc:creator>\n`;
+  }
+  
+  // Add series info (Calibre metadata)
+  if(allSameSeries && commonSeries){
+    metaXml += `    <meta name="calibre:series" content="${escapeXml(commonSeries)}"/>\n`;
+  }
+  
+  if(mergedObj.cover){
+    metaXml += `    <meta name="cover" content="cover-image"/>\n`;
+  }
+  
+  const contentOpf = `<?xml version="1.0" encoding="utf-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="uid">\n  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:calibre="http://calibre.ebook.com">\n${metaXml}  </metadata>\n  <manifest>\n    ${manifest.join('\n    ')}\n  </manifest>\n  <spine toc="ncx">\n    ${spine.join('\n    ')}\n  </spine>\n</package>`;
 
   oebps.file('content.opf', contentOpf);
 
@@ -731,8 +854,9 @@ async function processMobiArrayBuffer(arrayBuffer, fileName){
     .replace(/(<a\b[^>]*)filepos=\d+([^>]*>)/gi, '$1$2')
     .replace(/<img[^>]*recindex="[^"]*"[^>]*\/?>/gi, '');
 
-  const xml = `<?xml version="1.0"?><FictionBook><description><title-info><book-title>${escapeXml(title)}</book-title></title-info></description><body>${html}</body></FictionBook>`;
-  return {name: fileName, xml, binaries: new Map(), cover: null};
+    const xml = `<?xml version="1.0"?><FictionBook><description><title-info><book-title>${escapeXml(title)}</book-title></title-info></description><body>${html}</body></FictionBook>`;
+  const meta = parseFB2Meta(xml);
+  return {name: fileName, xml, binaries: new Map(), cover: null, author: meta.author, series: meta.series, seriesNum: meta.seriesNum};
 }
 
 // Strip trailing extra data from a MOBI text record
