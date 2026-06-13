@@ -642,7 +642,8 @@ async function createEpubFromMerged(mergedObj, filename='book.epub'){
 
   let manifest = [];
   let spine = [];
-  let tocNav = [];
+  let tocNav = []; // for NCX
+  let navItems = []; // for EPUB 3 <nav>
   let fileIdx = 0;
   let playOrder = 0;
 
@@ -660,31 +661,14 @@ async function createEpubFromMerged(mergedObj, filename='book.epub'){
     playOrder++;
   }
 
-  // create TOC page
-  let tocHtml = '<h1>Содержание</h1><ol>';
-  for(let i=0; i<items.length; i++){
-    const parsed = parseFB2(items[i].xml);
-    const safeTitle = (parsed.title || items[i].name || `Часть ${i+1}`).replace(/[<>"'&]/g,'');
-    tocHtml += `<li><a href="book${i+1}.xhtml">${escapeHtml(safeTitle)}</a></li>`;
-  }
-  tocHtml += '</ol>';
-  
-  const tocXhtml = `<?xml version="1.0" encoding="utf-8"?>\n<html xmlns="http://www.w3.org/1999/xhtml">\n<head><title>Содержание</title></head>\n<body>${tocHtml}</body>\n</html>`;
-  fileIdx++;
-  const tocId = `file${fileIdx}`;
-  xhtmlFolder.file('toc_page.xhtml', tocXhtml);
-  manifest.push(`<item id="${tocId}" href="xhtml/toc_page.xhtml" media-type="application/xhtml+xml"/>`);
-  spine.push(`<itemref idref="${tocId}" />`);
-  playOrder++;
-  tocNav.push({id:tocId, title:'Содержание', href:'xhtml/toc_page.xhtml', playOrder, children:[]});
-
   // create chapters for each book with sections
   for(let bookIdx=0; bookIdx<items.length; bookIdx++){
     const it = items[bookIdx];
     const parsed = parseFB2(it.xml);
     const bookTitle = (parsed.title || it.name || `Часть ${bookIdx+1}`).replace(/[<>"'&]/g,'');
     
-    const bookNavPoint = {id:`book${bookIdx+1}`, title:bookTitle, href:'', playOrder:playOrder++, children:[]};
+    const navPoint = {id:`book${bookIdx+1}`, title:bookTitle, href:'', playOrder:playOrder++, children:[]};
+    const navItem = {title:bookTitle, href:'', children:[]};
     
     // each body with its sections
     for(let bodyIdx=0; bodyIdx<parsed.bodies.length; bodyIdx++){
@@ -700,15 +684,43 @@ async function createEpubFromMerged(mergedObj, filename='book.epub'){
       manifest.push(`<item id="${fileId}" href="xhtml/${fileName}" media-type="application/xhtml+xml"/>`);
       spine.push(`<itemref idref="${fileId}" />`);
       
-      bookNavPoint.children.push({id:fileId, title:sectionTitle, href:`xhtml/${fileName}`, playOrder:playOrder++});
+      const href = `xhtml/${fileName}`;
+      navPoint.children.push({id:fileId, title:sectionTitle, href, playOrder:playOrder++});
+      navItem.children.push({title:sectionTitle, href});
       
-      if(bodyIdx===0) bookNavPoint.href = `xhtml/${fileName}`;
+      if(bodyIdx===0){
+        navPoint.href = href;
+        navItem.href = href;
+      }
     }
     
-    tocNav.push(bookNavPoint);
+    tocNav.push(navPoint);
+    navItems.push(navItem);
   }
 
-  // build NCX with hierarchy
+  // build EPUB 3 <nav> element for nav.xhtml (this is what Kindle uses!)
+  function buildNavHtml(navList, isTop=true){
+    let html = isTop ? '<nav epub:type="toc" id="toc">\n<h1>Содержание</h1>\n<ol>\n' : '<ol>\n';
+    for(const n of navList){
+      if(n.href){
+        html += `  <li><a href="${escapeXml(n.href)}">${escapeHtml(n.title)}</a>`;
+      } else {
+        html += `  <li><span>${escapeHtml(n.title)}</span>`;
+      }
+      if(n.children && n.children.length > 0){
+        html += '\n' + buildNavHtml(n.children, false);
+      }
+      html += '</li>\n';
+    }
+    html += isTop ? '</ol>\n</nav>' : '</ol>\n';
+    return html;
+  }
+  
+  const navXhtml = `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops">\n<head><title>Содержание</title></head>\n<body>\n${buildNavHtml(navItems)}\n</body>\n</html>`;
+  xhtmlFolder.file('nav.xhtml', navXhtml);
+  manifest.push(`<item id="nav" href="xhtml/nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>`);
+  
+  // build NCX for backward compatibility (ALReader, old readers)
   let ncxNavPoints = '';
   function buildNcx(navs, indent=0){
     for(let i=0; i<navs.length; i++){
@@ -722,7 +734,9 @@ async function createEpubFromMerged(mergedObj, filename='book.epub'){
       ncxNavPoints += '</navPoint>\n';
     }
   }
-  buildNcx(tocNav.slice(1)); // skip cover entry
+  // Filter out items without href for NCX (only chapters)
+  const ncxNav = tocNav.filter(n => n.href);
+  buildNcx(ncxNav);
   
   const ncxTitle = allSameSeries && commonSeries ? commonSeries : title;
   const ncx = `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">\n<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">\n  <head>\n    <meta name="dtb:uid" content="id:merged"/>\n  </head>\n  <docTitle><text>${escapeXml(ncxTitle)}</text></docTitle>\n  ${allAuthors.length > 0 ? `  <docAuthor><text>${escapeXml(allAuthors.join('; '))}</text></docAuthor>\n` : ''}  <navMap>\n    ${ncxNavPoints}\n  </navMap>\n</ncx>`;
@@ -750,7 +764,8 @@ async function createEpubFromMerged(mergedObj, filename='book.epub'){
     metaXml += `    <meta name="cover" content="cover-image"/>\n`;
   }
   
-  const contentOpf = `<?xml version="1.0" encoding="utf-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="uid">\n  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:calibre="http://calibre.ebook.com">\n${metaXml}  </metadata>\n  <manifest>\n    ${manifest.join('\n    ')}\n  </manifest>\n  <spine toc="ncx">\n    ${spine.join('\n    ')}\n  </spine>\n</package>`;
+  // EPUB 3 package
+  const contentOpf = `<?xml version="1.0" encoding="utf-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">\n  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:calibre="http://calibre.ebook.com">\n${metaXml}  </metadata>\n  <manifest>\n    ${manifest.join('\n    ')}\n  </manifest>\n  <spine>\n    ${spine.join('\n    ')}\n  </spine>\n</package>`;
 
   oebps.file('content.opf', contentOpf);
 
