@@ -186,7 +186,7 @@ async function processEpubArrayBuffer(arrayBuffer, name){
     }catch(e){ continue; }
   }
   const bodyCombined = bodies.join('');
-  const xml = `<?xml version="1.0"?><FictionBook><description><title><document-title><p>${escapeXml(title)}</p></document-title></title></description><body>${bodyCombined}</body></FictionBook>`;
+  const xml = `<?xml version="1.0"?><FictionBook><description><title-info><book-title>${escapeXml(title)}</book-title></title-info></description><body>${bodyCombined}</body></FictionBook>`;
   return {name, xml, binaries:new Map(), cover};
 }
 
@@ -240,12 +240,27 @@ function parseFB2(xmlText){
   const doc = parser.parseFromString(xmlText, 'application/xml');
   // FB2 title is in <description><title-info><book-title>
   // querySelector may fail with namespaced XML, so use multiple fallbacks
-  let titleEl = doc.querySelector('description > title-info > book-title')
+    let titleEl = doc.querySelector('description > title-info > book-title')
               || doc.querySelector('title-info > book-title')
               || doc.querySelector('book-title');
   if (!titleEl) {
     const els = doc.getElementsByTagName('book-title');
     if (els.length > 0) titleEl = els[0];
+  }
+  if (!titleEl) {
+    // fallback for document-title (used by alternative FB2 styles)
+    const dtEl = doc.querySelector('document-title');
+    if (dtEl) titleEl = dtEl;
+  }
+  if (!titleEl) {
+    // try generic title element (avoid section titles)
+    const titleEls = doc.getElementsByTagName('title');
+    for (const t of titleEls) {
+      const parent = t.parentElement;
+      if (parent && (parent.tagName === 'SECTION' || parent.tagName === 'BODY' && !t.querySelector('p'))) continue;
+      titleEl = t;
+      break;
+    }
   }
   const title = titleEl ? titleEl.textContent.trim() : 'Untitled';
   
@@ -377,7 +392,8 @@ exportEpubBtn.addEventListener('click', async ()=>{
   setStatus('Создаю EPUB...', true);
   exportEpubBtn.disabled = true;
   try{
-    await createEpubFromMerged(v, 'merged.epub');
+    const safeFilename = (v.title || 'merged').replace(/[<>:"/\\|?*]+/g, '_').replace(/\s+/g, ' ') + '.epub';
+    await createEpubFromMerged(v, safeFilename);
     log('✅ EPUB скачан!');
     setStatus('EPUB готов ✓');
   } catch(e){
