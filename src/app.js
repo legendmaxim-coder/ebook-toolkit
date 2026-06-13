@@ -142,7 +142,41 @@ async function processFile(file){
     loadedFb2s.push({name:file.name, xml:wrapped, binaries:new Map(), cover:null});
     log('✓ Загружен (HTML/TXT):', file.name);
   } else {
-    log('✗ Пропущен файл (формат не поддерживается):', file.name);
+    // Try to detect format by content (magic bytes) — useful on mobile where file extension may be unrecognized
+    log('→ Пытаюсь определить формат по содержимому:', file.name);
+    try{
+      const arr = await file.arrayBuffer();
+      const header = new Uint8Array(arr.slice(0, 4));
+      const headerStr = String.fromCharCode(header[0], header[1], header[2], header[3]);
+      // PK\x03\x04 = ZIP/EPUB
+      if(header[0] === 0x50 && header[1] === 0x4B && header[2] === 0x03 && header[3] === 0x04){
+        const item = await processEpubArrayBuffer(arr, file.name);
+        loadedFb2s.push(item);
+        log('✓ Определён как EPUB:', file.name);
+      } else if(headerStr === 'MOBI') {
+        const item = await processMobiArrayBuffer(arr, file.name);
+        loadedFb2s.push(item);
+        log('✓ Определён как MOBI:', file.name);
+      } else {
+        // Try as text (FB2/HTML/TXT)
+        const txt = await file.text();
+        if(txt.trim().startsWith('<?xml') || txt.trim().startsWith('<FictionBook') || txt.includes('<FictionBook')){
+          const item = extractBinariesAndCover(txt, file.name);
+          loadedFb2s.push(item);
+          log('✓ Определён как FB2 (по содержимому):', file.name);
+        } else if(txt.includes('<html') || txt.includes('<!DOCTYPE html')){
+          const wrapped = `<?xml version="1.0"?><FictionBook><body>${txt}</body></FictionBook>`;
+          loadedFb2s.push({name:file.name, xml:wrapped, binaries:new Map(), cover:null});
+          log('✓ Определён как HTML (по содержимому):', file.name);
+        } else {
+          const wrapped = `<?xml version="1.0"?><FictionBook><body>${txt}</body></FictionBook>`;
+          loadedFb2s.push({name:file.name, xml:wrapped, binaries:new Map(), cover:null});
+          log('✓ Загружен как текст:', file.name);
+        }
+      }
+    } catch(err){
+      log('✗ Не удалось загрузить файл:', file.name, '—', err.message||err);
+    }
   }
 }
 
