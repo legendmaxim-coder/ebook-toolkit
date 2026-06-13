@@ -1,0 +1,39 @@
+name: Convert ebooks to EPUB
+
+on:
+  workflow_dispatch:
+
+jobs:
+  convert:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: List input files
+        run: |
+          echo "Files in input/:" 
+          ls -la input || true
+
+      - name: Install Calibre
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xz-utils python3-pip
+          wget -nv -O- https://download.calibre-ebook.com/linux-installer.sh | sudo sh /dev/stdin
+
+      - name: Convert to EPUB
+        run: |
+          mkdir -p converted
+          for f in input/*; do
+            [ -f "$f" ] || continue
+            base=$(basename "$f")
+            out="converted/${base%.*}.epub"
+            echo "Converting $f -> $out"
+            ebook-convert "$f" "$out" || echo "Failed: $f"
+          done
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: converted-epubs
+          path: converted/

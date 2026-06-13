@@ -1,0 +1,9 @@
+{
+  "name": "ebook-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "npx http-server -c-1 . -p 8080",
+    "android:open": "npx cap open android"
+  }
+}

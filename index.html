@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0e1a" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="description" content="Объединение и конвертация FB2, EPUB, MOBI книг в EPUB" />
+  <title>eBook Toolkit</title>
+  <link rel="manifest" href="manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="src/styles.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</head>
+<body>
+
+  <div class="bg-orbs" aria-hidden="true">
+    <div class="orb orb-1"></div>
+    <div class="orb orb-2"></div>
+    <div class="orb orb-3"></div>
+  </div>
+
+  <div class="app-wrapper">
+
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo">
+        <span class="logo-icon" aria-hidden="true">📚</span>
+        <div class="logo-text">
+          <h1 class="app-title">eBook Toolkit</h1>
+          <p class="app-subtitle">Объединение книг в EPUB</p>
+        </div>
+      </div>
+      <div class="header-badge">
+        <span class="badge-dot"></span>
+        <span id="statusText">Готов</span>
+      </div>
+    </header>
+
+    <main>
+
+      <!-- Upload Zone -->
+      <section class="card upload-card" aria-label="Загрузка файлов">
+        <div
+          id="dropZone"
+          class="drop-zone"
+          role="button"
+          tabindex="0"
+          aria-label="Перетащите файлы или нажмите для выбора"
+        >
+          <div class="drop-zone-icon" aria-hidden="true">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="24" fill="url(#g1)" fill-opacity="0.15"/>
+              <path d="M24 32V20M18 26l6-6 6 6" stroke="url(#g2)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M14 36h20" stroke="url(#g2)" stroke-width="2.5" stroke-linecap="round"/>
+              <defs>
+                <linearGradient id="g1" x1="0" y1="0" x2="48" y2="48" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#667eea"/><stop offset="1" stop-color="#764ba2"/>
+                </linearGradient>
+                <linearGradient id="g2" x1="14" y1="20" x2="34" y2="36" gradientUnits="userSpaceOnUse">
+                  <stop stop-color="#667eea"/><stop offset="1" stop-color="#a78bfa"/>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+          <p class="drop-title">Перетащите файлы сюда</p>
+          <p class="drop-subtitle">или нажмите для выбора</p>
+          <div class="drop-formats">
+            <span class="fmt-tag">FB2</span>
+            <span class="fmt-tag">EPUB</span>
+            <span class="fmt-tag">MOBI</span>
+            <span class="fmt-tag">ZIP</span>
+          </div>
+          <input
+            id="fileInput"
+            type="file"
+            multiple
+            accept=".fb2,.epub,.mobi,.zip,.html,.htm,.txt"
+            aria-hidden="true"
+            tabindex="-1"
+          />
+        </div>
+      </section>
+
+      <!-- File List -->
+      <section id="filesSection" class="card files-card hidden" aria-label="Загруженные файлы">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span aria-hidden="true">📖</span>
+            Загруженные книги
+          </h2>
+          <span id="fileCount" class="files-count">0 файлов</span>
+        </div>
+        <div id="filesList" class="files-list" role="list" aria-label="Список книг для объединения"></div>
+      </section>
+
+      <!-- Actions -->
+      <section id="actionsSection" class="card actions-card hidden" aria-label="Действия">
+        <button
+          id="mergeBtn"
+          class="btn btn-primary"
+          type="button"
+          aria-label="Объединить все загруженные книги"
+        >
+          <span class="btn-icon" aria-hidden="true">🔗</span>
+          Объединить книги
+        </button>
+        <button
+          id="exportEpubBtn"
+          class="btn btn-export"
+          type="button"
+          disabled
+          aria-label="Скачать объединённый EPUB"
+        >
+          <span class="btn-icon" aria-hidden="true">⬇️</span>
+          Скачать EPUB
+        </button>
+      </section>
+
+      <!-- Log -->
+      <section id="logSection" class="card log-card hidden" aria-label="Журнал операций">
+        <div class="section-header">
+          <h2 class="section-title">
+            <span aria-hidden="true">📋</span>
+            Журнал
+          </h2>
+          <button id="clearLogBtn" class="btn-ghost" type="button" aria-label="Очистить журнал">Очистить</button>
+        </div>
+        <div id="log" class="log-body" role="log" aria-live="polite" aria-label="Журнал событий"></div>
+      </section>
+
+    </main>
+
+    <footer class="app-footer">
+      <p>Работает локально · Ваши файлы никуда не отправляются</p>
+    </footer>
+
+  </div>
+
+  <script src="src/app.js"></script>
+</body>
+</html>

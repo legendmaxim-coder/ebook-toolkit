@@ -1,0 +1,24 @@
+{
+  "name": "eBook Toolkit",
+  "short_name": "eBook Toolkit",
+  "description": "Локальное объединение и конвертация книг (FB2, EPUB, MOBI) в единый EPUB",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#0a0e1a",
+  "theme_color": "#0a0e1a",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
